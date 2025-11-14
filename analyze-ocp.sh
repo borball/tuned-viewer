@@ -103,7 +103,17 @@ analyze_profiles() {
             echo "$(printf '=%.0s' {1..50})"
 
             # Run tuned_viewer with this node's profiles
-            python3 -m tuned_viewer --directories "$node_dir" list
+            echo "Analyzing profiles in: $node_dir"
+            if [ -d "$node_dir" ] && [ "$(ls -A "$node_dir")" ]; then
+                # Try with --directories flag first, then fallback to changing directory
+                python3 -m tuned_viewer --directories "$node_dir" list 2>/dev/null || {
+                    echo "Fallback: Running from profile directory..."
+                    cd "$node_dir" && python3 -m tuned_viewer list
+                    cd "$SCRIPT_DIR"
+                }
+            else
+                echo "No profiles found in $node_dir"
+            fi
 
             # If we have an active profile, show its details
             if [ -n "$active_profile" ] && [ "$active_profile" != "unknown" ]; then
@@ -111,6 +121,10 @@ analyze_profiles() {
                 echo "Active Profile Details:"
                 echo "-----------------------"
                 python3 -m tuned_viewer --directories "$node_dir" show "$active_profile" --format summary 2>/dev/null || {
+                    echo "Fallback: Analyzing from profile directory..."
+                    cd "$node_dir" && python3 -m tuned_viewer show "$active_profile" --format summary 2>/dev/null
+                    cd "$SCRIPT_DIR"
+                } || {
                     echo "Could not analyze active profile: $active_profile"
                 }
             fi
@@ -153,7 +167,7 @@ main() {
 
             echo ""
             echo "Downloaded profiles saved to: $DOWNLOAD_DIR"
-            echo "To analyze manually: python3 -m tuned_viewer --directories $DOWNLOAD_DIR/<node> list"
+            echo "To analyze manually: cd $DOWNLOAD_DIR/<node> && python3 -m tuned_viewer list"
             ;;
 
         "download-only")
