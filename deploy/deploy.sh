@@ -25,14 +25,24 @@ fi
 echo "Building container image..."
 cd "$PROJECT_ROOT"
 
-# Check which Dockerfile to use
-DOCKERFILE="Dockerfile"
-if [ ! -f "$DOCKERFILE" ]; then
-    echo "Warning: Dockerfile not found, using alternative"
+# Choose the best Dockerfile based on availability
+DOCKERFILE=""
+
+if [ -f "Dockerfile.ubi9" ]; then
+    DOCKERFILE="Dockerfile.ubi9"
+    echo "Using UBI9 Dockerfile (Python 3.9+)"
+elif [ -f "Dockerfile.alternative" ]; then
     DOCKERFILE="Dockerfile.alternative"
+    echo "Using alternative Dockerfile (full UBI8)"
+elif [ -f "Dockerfile" ]; then
+    DOCKERFILE="Dockerfile"
+    echo "Using standard Dockerfile (minimal UBI8)"
+else
+    echo "Error: No Dockerfile found!"
+    exit 1
 fi
 
-echo "Using $DOCKERFILE for build..."
+echo "Selected: $DOCKERFILE for build..."
 
 # Try different build approaches
 BUILD_SUCCESS=false

@@ -25,8 +25,9 @@ COPY tuned-viewer ./tuned-viewer
 COPY setup.py ./
 COPY README.md ./
 
-# Install the application
-RUN pip3 install --no-cache-dir -e .
+# Install the application (handle pip warnings gracefully)
+RUN python3 -m pip install --no-cache-dir --disable-pip-version-check -e . || \
+    pip3 install --no-cache-dir -e .
 
 # Make the script executable
 RUN chmod +x ./tuned-viewer
