@@ -291,23 +291,25 @@ podman login quay.io
 
 ### Deployment Options
 
-1. **Interactive Deployment** - Long-running pod for interactive analysis:
+1. **Sidecar Deployment** (Recommended) - Runs alongside tuned daemon:
    ```bash
-   oc apply -f deploy/namespace.yaml
-   oc apply -f deploy/rbac.yaml
-   oc apply -f deploy/deployment.yaml
+   ./deploy/deploy-sidecar.sh
    ```
+   - **DaemonSet option**: Runs on each node with host mounts
+   - **Single pod option**: Runs in tuned namespace with cluster access
+   - **Better performance**: Direct access to tuned files
 
-2. **Analysis Job** - One-time comprehensive cluster analysis:
+2. **Standalone Deployment** - Runs in separate namespace:
+   ```bash
+   ./deploy/deploy.sh
+   ```
+   - Requires cluster sync via `oc` commands
+   - More isolated but requires network access to tuned pods
+
+3. **Analysis Job** - One-time comprehensive cluster analysis:
    ```bash
    oc create -f deploy/job.yaml
    oc logs -f job/tuned-viewer-analysis
-   ```
-
-3. **Simple Pod** - Basic pod for quick analysis:
-   ```bash
-   oc apply -f deploy/pod.yaml
-   oc logs -f pod/tuned-viewer
    ```
 
 ### OpenShift Commands
@@ -378,11 +380,12 @@ success = viewer.sync_from_cluster('./cluster_profiles')
 podman login quay.io
 ./build.sh
 
-# 2. Deploy to OpenShift
-./deploy/deploy.sh
+# 2. Deploy as sidecar alongside tuned daemon (recommended)
+./deploy/deploy-sidecar.sh
 
-# 3. Run analysis
-oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer cluster
+# 3. Run analysis (replace POD_NAME with actual pod name)
+oc get pods -n openshift-cluster-node-tuning-operator -l app.kubernetes.io/name=tuned-viewer
+oc exec POD_NAME -n openshift-cluster-node-tuning-operator -- python3 -m tuned_viewer list
 ```
 
 ### Build Options
