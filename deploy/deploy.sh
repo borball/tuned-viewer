@@ -21,20 +21,76 @@ if ! oc whoami &> /dev/null; then
     exit 1
 fi
 
-# Build the container image (optional, if Dockerfile is available)
+# Build the container image
 echo "Building container image..."
 cd "$PROJECT_ROOT"
 
-# Option 1: Build with OpenShift BuildConfig
-echo "Creating BuildConfig for tuned-viewer..."
-oc new-build --binary --name=tuned-viewer --strategy=docker || echo "BuildConfig already exists"
-oc start-build tuned-viewer --from-dir=. --follow
+# Check which Dockerfile to use
+DOCKERFILE="Dockerfile"
+if [ ! -f "$DOCKERFILE" ]; then
+    echo "Warning: Dockerfile not found, using alternative"
+    DOCKERFILE="Dockerfile.alternative"
+fi
 
-# Option 2: Alternative - use podman/docker if available
-# if command -v podman &> /dev/null; then
-#     podman build -t tuned-viewer:latest .
-#     podman push tuned-viewer:latest <your-registry>/tuned-viewer:latest
-# fi
+echo "Using $DOCKERFILE for build..."
+
+# Try different build approaches
+BUILD_SUCCESS=false
+
+# Option 1: Build with OpenShift BuildConfig
+echo "Attempting build with OpenShift BuildConfig..."
+if oc new-build --binary --name=tuned-viewer --strategy=docker 2>/dev/null; then
+    echo "Created new BuildConfig"
+elif oc get bc tuned-viewer &>/dev/null; then
+    echo "BuildConfig already exists"
+else
+    echo "Failed to create BuildConfig"
+fi
+
+if oc start-build tuned-viewer --from-dir=. --follow; then
+    BUILD_SUCCESS=true
+    echo "✓ OpenShift build successful"
+else
+    echo "✗ OpenShift build failed"
+fi
+
+# Option 2: Try podman if OpenShift build failed
+if [ "$BUILD_SUCCESS" = false ] && command -v podman &> /dev/null; then
+    echo "Attempting build with podman..."
+    if podman build -f "$DOCKERFILE" -t tuned-viewer:latest .; then
+        BUILD_SUCCESS=true
+        echo "✓ Podman build successful"
+
+        # Try to push to OpenShift internal registry if possible
+        if oc get route default-route -n openshift-image-registry &>/dev/null; then
+            REGISTRY=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}')
+            echo "Attempting to push to internal registry: $REGISTRY"
+            podman tag tuned-viewer:latest "$REGISTRY/tuned-viewer/tuned-viewer:latest"
+            podman push "$REGISTRY/tuned-viewer/tuned-viewer:latest" || echo "Push to registry failed"
+        fi
+    else
+        echo "✗ Podman build failed"
+    fi
+fi
+
+# Option 3: Try docker if other methods failed
+if [ "$BUILD_SUCCESS" = false ] && command -v docker &> /dev/null; then
+    echo "Attempting build with docker..."
+    if docker build -f "$DOCKERFILE" -t tuned-viewer:latest .; then
+        BUILD_SUCCESS=true
+        echo "✓ Docker build successful"
+    else
+        echo "✗ Docker build failed"
+    fi
+fi
+
+if [ "$BUILD_SUCCESS" = false ]; then
+    echo "❌ All build attempts failed. Please check the Dockerfile and try manually:"
+    echo "   podman build -f $DOCKERFILE -t tuned-viewer:latest ."
+    echo "   OR"
+    echo "   docker build -f $DOCKERFILE -t tuned-viewer:latest ."
+    exit 1
+fi
 
 echo "Deploying Kubernetes resources..."
 

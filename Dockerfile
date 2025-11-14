@@ -7,8 +7,8 @@ LABEL name="tuned-viewer" \
       description="Tool to analyze and merge tuned profiles with OpenShift integration" \
       maintainer="tuned-viewer"
 
-# Install Python and required tools
-RUN microdnf install -y python3 python3-pip python3-pyyaml && \
+# Install Python, required tools, and user management utilities
+RUN microdnf install -y python3 python3-pip python3-pyyaml shadow-utils && \
     microdnf clean all
 
 # Create application directory and user
