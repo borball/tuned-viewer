@@ -1,0 +1,56 @@
+# Alternative Dockerfile - more robust approach
+FROM registry.access.redhat.com/ubi8/ubi:latest
+
+# Set labels for better container management
+LABEL name="tuned-viewer" \
+      version="1.0.0" \
+      description="Tool to analyze and merge tuned profiles with OpenShift integration" \
+      maintainer="tuned-viewer"
+
+# Install required packages including OpenShift CLI
+RUN yum update -y && \
+    yum install -y python3 python3-pip python3-pyyaml wget tar && \
+    yum clean all
+
+# Install OpenShift CLI
+RUN wget -O /tmp/oc.tar.gz "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz" && \
+    tar -C /usr/local/bin -xzf /tmp/oc.tar.gz oc && \
+    chmod +x /usr/local/bin/oc && \
+    rm /tmp/oc.tar.gz
+
+# Create non-root user
+RUN groupadd -r tuned-viewer && \
+    useradd -r -g tuned-viewer -d /app -s /bin/bash tuned-viewer
+
+# Create application directory
+WORKDIR /app
+
+# Copy application files with correct ownership
+COPY --chown=tuned-viewer:tuned-viewer tuned_viewer/ ./tuned_viewer/
+COPY --chown=tuned-viewer:tuned-viewer tuned-viewer ./tuned-viewer
+COPY --chown=tuned-viewer:tuned-viewer setup.py README.md ./
+
+# Install the application (suppress pip warnings and handle Python compatibility)
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir --disable-pip-version-check -e .
+
+# Make the script executable
+RUN chmod +x ./tuned-viewer
+
+# Create directories for profile analysis
+RUN mkdir -p /app/profiles /app/cluster_profiles && \
+    chown -R tuned-viewer:tuned-viewer /app
+
+# Switch to non-root user
+USER tuned-viewer
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PATH=/app:/usr/local/bin:$PATH
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python3 -m tuned_viewer env || exit 1
+
+# Default command - show help
+CMD ["python3", "-m", "tuned_viewer", "--help"]
