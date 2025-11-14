@@ -24,8 +24,8 @@ spec:
 
       containers:
       - name: analyzer
-        image: tuned-viewer:latest
-        imagePullPolicy: IfNotPresent
+        image: quay.io/bzhai/tuned-viewer:latest
+        imagePullPolicy: Always
 
         command: ["/bin/sh"]
         args:

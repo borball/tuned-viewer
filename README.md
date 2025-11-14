@@ -260,11 +260,33 @@ The tool can be deployed as a pod in OpenShift clusters to analyze tuned profile
 ### Quick Deployment
 
 ```bash
+# Build and publish (Linux with podman)
+./build.sh
+
 # Deploy to OpenShift cluster
 ./deploy/deploy.sh
 
 # Run analysis
 oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer cluster
+```
+
+### Build and Publish (Prerequisites)
+
+The container image is published to `quay.io/bzhai/tuned-viewer`. To build and publish:
+
+```bash
+# Prerequisites: Linux system with podman
+# Authenticate to quay.io
+podman login quay.io
+
+# Option 1: Full build with testing
+./build.sh
+
+# Option 2: Quick build and publish
+./publish.sh
+
+# Option 3: Build specific version
+./build.sh v1.2.3
 ```
 
 ### Deployment Options
@@ -341,6 +363,49 @@ success = viewer.validate_profile('realtime-compute')
 success = viewer.show_cluster_status()
 success = viewer.sync_from_cluster('./cluster_profiles')
 ```
+
+## Build and Deployment
+
+### Prerequisites
+
+- **For Building**: Linux system with podman, quay.io access
+- **For Deployment**: OpenShift cluster, oc CLI, cluster-admin privileges
+
+### Quick Start
+
+```bash
+# 1. Build and publish (Linux + podman)
+podman login quay.io
+./build.sh
+
+# 2. Deploy to OpenShift
+./deploy/deploy.sh
+
+# 3. Run analysis
+oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer cluster
+```
+
+### Build Options
+
+| Command | Description |
+|---------|-------------|
+| `./build.sh` | Full build with testing and publishing |
+| `./publish.sh` | Quick build and publish |
+| `./build.sh v1.2.3` | Build with specific version tag |
+
+### Troubleshooting
+
+**Common Build Issues:**
+
+1. **`useradd: command not found`** - Fixed by adding `shadow-utils` package
+2. **Python version errors** - Use `Dockerfile.ubi9` for Python 3.9+
+3. **quay.io authentication** - Run `podman login quay.io` first
+
+**Common Deploy Issues:**
+
+1. **Image not found** - Run `./build.sh` to publish image first
+2. **Permission denied** - Ensure cluster-admin access
+3. **Pod startup failures** - Check logs with `oc logs deployment/tuned-viewer`
 
 ## Error Handling
 

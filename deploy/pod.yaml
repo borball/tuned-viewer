@@ -13,8 +13,8 @@ spec:
 
   containers:
   - name: tuned-viewer
-    image: tuned-viewer:latest
-    imagePullPolicy: IfNotPresent
+    image: quay.io/bzhai/tuned-viewer:latest
+    imagePullPolicy: Always
 
     # Override default command to run cluster analysis
     command: ["/bin/sh"]

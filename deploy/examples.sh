@@ -1,79 +1,72 @@
 #!/bin/bash
 # Example usage commands for tuned-viewer in OpenShift
 
-echo "Tuned Viewer - OpenShift Usage Examples"
-echo "========================================"
+readonly NS="tuned-viewer"
+
+echo "Tuned Viewer - Usage Examples"
+echo "=============================="
 echo ""
 
-# Check if we're in the right namespace
-if [ "$(oc project -q 2>/dev/null)" != "tuned-viewer" ]; then
-    echo "Switching to tuned-viewer namespace..."
-    oc project tuned-viewer
-    echo ""
+# Build and deploy
+echo "🏗️  Build & Deploy:"
+echo "   ./build.sh                    # Build and publish to quay.io"
+echo "   ./deploy/deploy.sh           # Deploy to OpenShift"
+echo ""
+
+# Check deployment status
+if ! oc get deployment tuned-viewer -n $NS &> /dev/null; then
+    echo "❌ tuned-viewer not deployed. Run: ./deploy/deploy.sh"
+    exit 1
 fi
 
-echo "1. Check cluster tuned status:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer cluster"
+echo "✅ tuned-viewer is deployed"
 echo ""
 
-echo "2. Show environment information:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer env"
+# Core commands
+echo "📊 Analysis Commands:"
+echo ""
+echo "  # Cluster status overview"
+echo "  oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer cluster"
+echo ""
+echo "  # Sync profiles from cluster"
+echo "  oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer sync"
+echo ""
+echo "  # Analyze specific node (replace <node> with actual node name)"
+echo "  oc get nodes --no-headers | head -1 | awk '{print \$1}' | xargs -I {} oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer node {}"
+echo ""
+echo "  # Show profile hierarchy"
+echo "  oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer hierarchy latency-performance"
 echo ""
 
-echo "3. Sync profiles from cluster:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer sync"
+# Management commands
+echo "🔧 Management Commands:"
+echo ""
+echo "  # View logs"
+echo "  oc logs -f deployment/tuned-viewer -n $NS"
+echo ""
+echo "  # Interactive shell"
+echo "  oc exec -it deployment/tuned-viewer -n $NS -- /bin/sh"
+echo ""
+echo "  # Run analysis job"
+echo "  oc create -f deploy/job.yaml"
+echo ""
+echo "  # Clean up"
+echo "  oc delete namespace $NS"
 echo ""
 
-echo "4. Analyze specific node profile:"
-echo "   # First get node names:"
-echo "   oc get nodes"
-echo "   # Then analyze a specific node:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer node <node-name>"
-echo ""
+# Live demo
+echo "📋 Live Demo:"
+echo "============="
 
-echo "5. List all available profiles:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer list"
-echo ""
-
-echo "6. Show merged profile configuration:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer show <profile-name>"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer show <profile-name> --format json"
-echo ""
-
-echo "7. Validate profile hierarchy:"
-echo "   oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer validate <profile-name>"
-echo ""
-
-echo "8. Run comprehensive analysis job:"
-echo "   oc create -f deploy/job.yaml"
-echo "   oc logs -f job/tuned-viewer-analysis"
-echo ""
-
-echo "9. Interactive shell access:"
-echo "   oc exec -it deployment/tuned-viewer -- /bin/sh"
-echo ""
-
-echo "10. View live logs:"
-echo "    oc logs -f deployment/tuned-viewer"
-echo ""
-
-# Demonstrate actual commands if deployment exists
-if oc get deployment tuned-viewer &> /dev/null; then
-    echo ""
-    echo "Live Demonstrations:"
-    echo "==================="
-
-    echo ""
-    echo "Current cluster status:"
-    echo "-----------------------"
-    oc exec deployment/tuned-viewer -- python3 -m tuned_viewer cluster 2>/dev/null || echo "Failed to get cluster status"
-
-    echo ""
-    echo "Environment info:"
-    echo "----------------"
-    oc exec deployment/tuned-viewer -- python3 -m tuned_viewer env 2>/dev/null || echo "Failed to get environment info"
-else
-    echo ""
-    echo "Note: tuned-viewer deployment not found. Deploy first with:"
-    echo "  ./deploy/deploy.sh"
+# Switch to correct namespace
+if [ "$(oc project -q 2>/dev/null)" != "$NS" ]; then
+    oc project $NS &>/dev/null || true
 fi
+
+echo ""
+echo "Environment information:"
+oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer env 2>/dev/null | head -10
+
+echo ""
+echo "Cluster status:"
+oc exec deployment/tuned-viewer -n $NS -- python3 -m tuned_viewer cluster 2>/dev/null | head -15

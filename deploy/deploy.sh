@@ -1,141 +1,118 @@
 #!/bin/bash
-# Deploy tuned-viewer to OpenShift cluster
+# Deploy tuned-viewer to OpenShift
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+readonly REGISTRY_IMAGE="quay.io/bzhai/tuned-viewer:latest"
 
-echo "Deploying tuned-viewer to OpenShift..."
-echo "======================================"
+# Logging functions
+log_info() { echo "ℹ️  $*"; }
+log_success() { echo "✅ $*"; }
+log_error() { echo "❌ $*" >&2; }
+log_warning() { echo "⚠️  $*"; }
 
-# Check if oc is available
-if ! command -v oc &> /dev/null; then
-    echo "Error: 'oc' command not found. Please install the OpenShift CLI."
-    exit 1
-fi
+check_prerequisites() {
+    log_info "Checking prerequisites..."
 
-# Check if logged in to OpenShift
-if ! oc whoami &> /dev/null; then
-    echo "Error: Not logged in to OpenShift. Please run 'oc login' first."
-    exit 1
-fi
+    # Check if oc is available
+    if ! command -v oc &> /dev/null; then
+        log_error "'oc' command not found. Please install the OpenShift CLI."
+        exit 1
+    fi
 
-# Build the container image
-echo "Building container image..."
-cd "$PROJECT_ROOT"
+    # Check if logged in to OpenShift
+    if ! oc whoami &> /dev/null; then
+        log_error "Not logged in to OpenShift. Please run 'oc login' first."
+        exit 1
+    fi
 
-# Choose the best Dockerfile based on availability
-DOCKERFILE=""
+    log_success "OpenShift CLI configured"
+}
 
-if [ -f "Dockerfile.ubi9" ]; then
-    DOCKERFILE="Dockerfile.ubi9"
-    echo "Using UBI9 Dockerfile (Python 3.9+)"
-elif [ -f "Dockerfile.alternative" ]; then
-    DOCKERFILE="Dockerfile.alternative"
-    echo "Using alternative Dockerfile (full UBI8)"
-elif [ -f "Dockerfile" ]; then
-    DOCKERFILE="Dockerfile"
-    echo "Using standard Dockerfile (minimal UBI8)"
-else
-    echo "Error: No Dockerfile found!"
-    exit 1
-fi
+verify_image() {
+    log_info "Verifying image availability: $REGISTRY_IMAGE"
 
-echo "Selected: $DOCKERFILE for build..."
-
-# Try different build approaches
-BUILD_SUCCESS=false
-
-# Option 1: Build with OpenShift BuildConfig
-echo "Attempting build with OpenShift BuildConfig..."
-if oc new-build --binary --name=tuned-viewer --strategy=docker 2>/dev/null; then
-    echo "Created new BuildConfig"
-elif oc get bc tuned-viewer &>/dev/null; then
-    echo "BuildConfig already exists"
-else
-    echo "Failed to create BuildConfig"
-fi
-
-if oc start-build tuned-viewer --from-dir=. --follow; then
-    BUILD_SUCCESS=true
-    echo "✓ OpenShift build successful"
-else
-    echo "✗ OpenShift build failed"
-fi
-
-# Option 2: Try podman if OpenShift build failed
-if [ "$BUILD_SUCCESS" = false ] && command -v podman &> /dev/null; then
-    echo "Attempting build with podman..."
-    if podman build -f "$DOCKERFILE" -t tuned-viewer:latest .; then
-        BUILD_SUCCESS=true
-        echo "✓ Podman build successful"
-
-        # Try to push to OpenShift internal registry if possible
-        if oc get route default-route -n openshift-image-registry &>/dev/null; then
-            REGISTRY=$(oc get route default-route -n openshift-image-registry --template='{{ .spec.host }}')
-            echo "Attempting to push to internal registry: $REGISTRY"
-            podman tag tuned-viewer:latest "$REGISTRY/tuned-viewer/tuned-viewer:latest"
-            podman push "$REGISTRY/tuned-viewer/tuned-viewer:latest" || echo "Push to registry failed"
+    # Try different methods to verify image exists
+    if command -v podman &> /dev/null && podman pull "$REGISTRY_IMAGE" &>/dev/null; then
+        log_success "Image verified via podman"
+        return 0
+    elif command -v skopeo &> /dev/null && skopeo inspect "docker://$REGISTRY_IMAGE" &>/dev/null; then
+        log_success "Image verified via skopeo"
+        return 0
+    else
+        log_warning "Unable to verify image at $REGISTRY_IMAGE"
+        echo ""
+        echo "To build and push the image:"
+        echo "  cd $PROJECT_ROOT"
+        echo "  ./build.sh"
+        echo ""
+        read -p "Continue with deployment anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_error "Deployment cancelled. Build the image first with './build.sh'"
+            exit 1
         fi
-    else
-        echo "✗ Podman build failed"
+        log_warning "Proceeding without image verification"
     fi
-fi
+}
 
-# Option 3: Try docker if other methods failed
-if [ "$BUILD_SUCCESS" = false ] && command -v docker &> /dev/null; then
-    echo "Attempting build with docker..."
-    if docker build -f "$DOCKERFILE" -t tuned-viewer:latest .; then
-        BUILD_SUCCESS=true
-        echo "✓ Docker build successful"
-    else
-        echo "✗ Docker build failed"
-    fi
-fi
+deploy_resources() {
+    log_info "Deploying Kubernetes resources..."
 
-if [ "$BUILD_SUCCESS" = false ]; then
-    echo "❌ All build attempts failed. Please check the Dockerfile and try manually:"
-    echo "   podman build -f $DOCKERFILE -t tuned-viewer:latest ."
-    echo "   OR"
-    echo "   docker build -f $DOCKERFILE -t tuned-viewer:latest ."
-    exit 1
-fi
+    # Create namespace
+    log_info "Creating namespace..."
+    oc apply -f "$SCRIPT_DIR/namespace.yaml"
 
-echo "Deploying Kubernetes resources..."
+    # Create RBAC
+    log_info "Creating RBAC resources..."
+    oc apply -f "$SCRIPT_DIR/rbac.yaml"
 
-# Create namespace
-echo "Creating namespace..."
-oc apply -f "$SCRIPT_DIR/namespace.yaml"
+    # Deploy the application
+    log_info "Deploying application..."
+    oc apply -f "$SCRIPT_DIR/deployment.yaml"
+    oc apply -f "$SCRIPT_DIR/service.yaml"
+}
 
-# Create RBAC
-echo "Creating RBAC resources..."
-oc apply -f "$SCRIPT_DIR/rbac.yaml"
+show_summary() {
+    echo ""
+    log_success "Deployment complete!"
+    echo ""
+    echo "📋 Available commands:"
+    echo ""
+    echo "  # Check deployment status"
+    echo "  oc get pods -n tuned-viewer"
+    echo ""
+    echo "  # View logs"
+    echo "  oc logs -f deployment/tuned-viewer -n tuned-viewer"
+    echo ""
+    echo "  # Run cluster analysis"
+    echo "  oc exec -it deployment/tuned-viewer -n tuned-viewer -- python3 -m tuned_viewer cluster"
+    echo ""
+    echo "  # Sync profiles from cluster"
+    echo "  oc exec -it deployment/tuned-viewer -n tuned-viewer -- python3 -m tuned_viewer sync"
+    echo ""
+    echo "  # Run comprehensive analysis job"
+    echo "  oc create -f $SCRIPT_DIR/job.yaml"
+    echo ""
+    echo "  # Clean up"
+    echo "  oc delete namespace tuned-viewer"
+    echo ""
+}
 
-# Deploy the application
-echo "Deploying application..."
-oc apply -f "$SCRIPT_DIR/deployment.yaml"
-oc apply -f "$SCRIPT_DIR/service.yaml"
+# Main execution
+main() {
+    echo "Deploying tuned-viewer to OpenShift"
+    echo "===================================="
+    echo "Using image: $REGISTRY_IMAGE"
+    echo ""
 
-echo ""
-echo "Deployment complete!"
-echo "==================="
-echo ""
-echo "Available commands:"
-echo "  # Check deployment status"
-echo "  oc get pods -n tuned-viewer"
-echo ""
-echo "  # View logs"
-echo "  oc logs -f deployment/tuned-viewer -n tuned-viewer"
-echo ""
-echo "  # Run interactive analysis"
-echo "  oc exec -it deployment/tuned-viewer -n tuned-viewer -- python3 -m tuned_viewer cluster"
-echo "  oc exec -it deployment/tuned-viewer -n tuned-viewer -- python3 -m tuned_viewer sync"
-echo ""
-echo "  # Run analysis job"
-echo "  oc create -f $SCRIPT_DIR/job.yaml"
-echo "  oc logs -f job/tuned-viewer-analysis -n tuned-viewer"
-echo ""
-echo "  # Clean up"
-echo "  oc delete namespace tuned-viewer"
-echo ""
+    check_prerequisites
+    verify_image
+    deploy_resources
+    show_summary
+}
+
+# Run main function
+main
