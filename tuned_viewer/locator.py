@@ -19,13 +19,38 @@ class ProfileLocator:
         '/run/tuned/profiles',      # Runtime profiles
     ]
 
-    def __init__(self, custom_directories: Optional[List[str]] = None):
+    # Pod-mounted directories (for OpenShift/Kubernetes environments)
+    POD_MOUNT_DIRECTORIES = [
+        '/host/etc/tuned/profiles',    # Host /etc mounted in pod
+        '/host/usr/lib/tuned/profiles', # Host /usr/lib mounted in pod
+        '/etc/tuned/profiles',         # Pod's own /etc
+        '/usr/lib/tuned/profiles',     # Pod's own /usr/lib
+    ]
+
+    def __init__(self, custom_directories: Optional[List[str]] = None, detect_pod_env: bool = True):
         """Initialize with optional custom directories."""
-        self.directories = custom_directories or self.STANDARD_DIRECTORIES.copy()
+        self.in_pod = self._detect_pod_environment() if detect_pod_env else False
+
+        if custom_directories:
+            self.directories = custom_directories
+        elif self.in_pod:
+            # Use pod-aware directories when running in a container
+            self.directories = self.POD_MOUNT_DIRECTORIES.copy()
+        else:
+            self.directories = self.STANDARD_DIRECTORIES.copy()
 
         # Add current directory profiles for testing
         if os.path.exists('./profiles'):
             self.directories.insert(0, './profiles')
+
+    def _detect_pod_environment(self) -> bool:
+        """Detect if we're running inside a Kubernetes pod."""
+        return (
+            os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount') or
+            os.environ.get('KUBERNETES_SERVICE_HOST') is not None or
+            os.path.exists('/host/etc') or  # Common host mount point
+            os.environ.get('NODE_NAME') is not None  # Often set in tuned pods
+        )
 
     def find_profile(self, profile_name: str) -> Optional[str]:
         """Find a profile configuration file by name."""
@@ -98,16 +123,48 @@ class ProfileLocator:
 
     def get_active_profile(self) -> Optional[str]:
         """Get the currently active profile name from /etc/tuned/active_profile."""
-        active_profile_file = '/etc/tuned/active_profile'
+        # Try different locations based on environment
+        active_profile_candidates = [
+            '/etc/tuned/active_profile',      # Standard location
+            '/host/etc/tuned/active_profile', # Host mount in pod
+        ]
 
-        if os.path.isfile(active_profile_file):
+        for active_profile_file in active_profile_candidates:
+            if os.path.isfile(active_profile_file):
+                try:
+                    with open(active_profile_file, 'r', encoding='utf-8') as f:
+                        return f.read().strip()
+                except (IOError, UnicodeDecodeError):
+                    continue
+
+        return None
+
+    def get_environment_info(self) -> Dict[str, any]:
+        """Get information about the current environment."""
+        info = {
+            'in_pod': self.in_pod,
+            'searched_directories': self.directories,
+            'environment_variables': {}
+        }
+
+        # Gather relevant environment variables
+        env_vars = ['NODE_NAME', 'KUBERNETES_SERVICE_HOST', 'KUBERNETES_NAMESPACE', 'POD_NAME']
+        for var in env_vars:
+            value = os.environ.get(var)
+            if value:
+                info['environment_variables'][var] = value
+
+        # Check for service account
+        if os.path.exists('/var/run/secrets/kubernetes.io/serviceaccount'):
+            info['service_account'] = True
+            # Try to read namespace
             try:
-                with open(active_profile_file, 'r', encoding='utf-8') as f:
-                    return f.read().strip()
+                with open('/var/run/secrets/kubernetes.io/serviceaccount/namespace', 'r') as f:
+                    info['namespace'] = f.read().strip()
             except (IOError, UnicodeDecodeError):
                 pass
 
-        return None
+        return info
 
     def validate_directories(self) -> Dict[str, bool]:
         """Validate that profile directories exist and are accessible."""

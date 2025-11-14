@@ -13,6 +13,7 @@ from .locator import ProfileLocator
 from .resolver import IncludeResolver, CircularIncludeError, ProfileNotFoundError
 from .merger import ProfileMerger
 from .parser import TunedProfile
+from .k8s_integration import OpenShiftTunedIntegration, PodAwareLocator
 
 
 class TunedViewer:
@@ -22,6 +23,8 @@ class TunedViewer:
         self.locator = ProfileLocator(custom_directories)
         self.resolver = IncludeResolver(self.locator)
         self.merger = ProfileMerger()
+        self.openshift = OpenShiftTunedIntegration()
+        self.pod_locator = PodAwareLocator(self.openshift)
 
     def show_merged_profile(self, profile_name: str, output_format: str = 'ini') -> bool:
         """Show the final merged profile configuration."""
@@ -122,6 +125,166 @@ class TunedViewer:
 
         except Exception as e:
             print(f"Error during validation: {e}", file=sys.stderr)
+            return False
+
+    def show_cluster_status(self) -> bool:
+        """Show tuned status across the OpenShift cluster."""
+        try:
+            status = self.openshift.get_cluster_tuned_status()
+
+            print("OpenShift Cluster Tuned Status")
+            print("=" * 50)
+
+            # Show pod status
+            pods = status["pods"]
+            print(f"Tuned Pods: {len(pods)}")
+            print("-" * 30)
+
+            for pod in pods:
+                status_symbol = "✓" if pod["status"] == "Running" else "✗"
+                restarts_info = f" (restarts: {pod['restarts']})" if pod["restarts"] > 0 else ""
+
+                print(f"{status_symbol} {pod['name']:<20} | Node: {pod['node']:<15} | {pod['status']}{restarts_info}")
+
+            # Show active profiles per node
+            print(f"\nActive Profiles per Node:")
+            print("-" * 30)
+
+            active_profiles = status["active_profiles"]
+            for node, info in active_profiles.items():
+                profile = info.get("profile", "unknown")
+                pod_status = info.get("status", "unknown")
+                print(f"  {node:<20} | {profile:<15} | Pod: {info['pod']} ({pod_status})")
+
+            # Show ConfigMaps
+            configmaps = status["configmaps"]
+            if configmaps:
+                print(f"\nTuned ConfigMaps: {len(configmaps)}")
+                print("-" * 30)
+                for cm in configmaps:
+                    print(f"  {cm['name']:<25} | Keys: {', '.join(cm['data_keys'][:3])}{'...' if len(cm['data_keys']) > 3 else ''}")
+
+            # Show Custom Resources
+            custom_resources = status["custom_resources"]
+            if custom_resources:
+                print(f"\nTuned Custom Resources: {len(custom_resources)}")
+                print("-" * 30)
+                for cr in custom_resources:
+                    print(f"  {cr['name']}")
+
+            return True
+
+        except Exception as e:
+            print(f"Error getting cluster status: {e}", file=sys.stderr)
+            return False
+
+    def sync_from_cluster(self, output_dir: str = "./cluster_profiles") -> bool:
+        """Sync tuned profiles from cluster to local directory."""
+        try:
+            print(f"Syncing tuned profiles from cluster to: {output_dir}")
+            print("-" * 50)
+
+            results = self.pod_locator.sync_profiles_from_cluster(output_dir)
+
+            # Report synced profiles from pods
+            synced_pods = results["synced_pods"]
+            if synced_pods:
+                print(f"Synced {len(synced_pods)} profiles from pods:")
+                for sync in synced_pods:
+                    print(f"  ✓ {sync['profile']} from pod {sync['pod']} (node: {sync['node']})")
+            else:
+                print("  No profiles synced from pods")
+
+            # Report synced ConfigMaps
+            synced_cms = results["synced_configmaps"]
+            if synced_cms:
+                print(f"\nSynced {len(synced_cms)} ConfigMaps:")
+                for cm in synced_cms:
+                    print(f"  ✓ {cm}")
+            else:
+                print("\n  No profiles synced from ConfigMaps")
+
+            # Report errors
+            if results["errors"]:
+                print(f"\nErrors encountered:")
+                for error in results["errors"]:
+                    print(f"  ✗ {error}")
+
+            print(f"\nProfiles synced to: {output_dir}")
+            print("You can now use 'tuned-viewer --directories {output_dir}' to analyze them")
+
+            return True
+
+        except Exception as e:
+            print(f"Error syncing from cluster: {e}", file=sys.stderr)
+            return False
+
+    def show_environment_info(self) -> bool:
+        """Show information about the current environment."""
+        try:
+            env_info = self.locator.get_environment_info()
+
+            print("Environment Information")
+            print("=" * 50)
+
+            print(f"Running in pod: {'Yes' if env_info['in_pod'] else 'No'}")
+
+            if env_info.get('namespace'):
+                print(f"Namespace: {env_info['namespace']}")
+
+            if env_info['environment_variables']:
+                print("\nEnvironment Variables:")
+                for var, value in env_info['environment_variables'].items():
+                    print(f"  {var}: {value}")
+
+            print(f"\nSearched Directories:")
+            validation = self.locator.validate_directories()
+            for directory in env_info['searched_directories']:
+                accessible = validation.get(directory, False)
+                symbol = "✓" if accessible else "✗"
+                print(f"  {symbol} {directory}")
+
+            active_profile = self.locator.get_active_profile()
+            if active_profile:
+                print(f"\nActive Profile: {active_profile}")
+
+            return True
+
+        except Exception as e:
+            print(f"Error getting environment info: {e}", file=sys.stderr)
+            return False
+
+    def analyze_node_profile(self, node_name: str) -> bool:
+        """Analyze the tuned profile for a specific node."""
+        try:
+            status = self.openshift.get_cluster_tuned_status()
+            active_profiles = status["active_profiles"]
+
+            if node_name not in active_profiles:
+                available_nodes = list(active_profiles.keys())
+                print(f"Node '{node_name}' not found. Available nodes: {', '.join(available_nodes)}", file=sys.stderr)
+                return False
+
+            node_info = active_profiles[node_name]
+            profile_name = node_info["profile"]
+            pod_name = node_info["pod"]
+
+            print(f"Node Profile Analysis: {node_name}")
+            print("=" * 50)
+            print(f"Node: {node_name}")
+            print(f"Pod: {pod_name}")
+            print(f"Profile: {profile_name}")
+            print()
+
+            if not profile_name:
+                print("No active profile found for this node")
+                return False
+
+            # Try to show the merged profile
+            return self.show_merged_profile(profile_name)
+
+        except Exception as e:
+            print(f"Error analyzing node profile: {e}", file=sys.stderr)
             return False
 
     def _output_ini(self, profile: TunedProfile):
@@ -242,11 +405,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Local profile analysis
   tuned-viewer list                           # List all available profiles
   tuned-viewer show balanced                  # Show merged balanced profile
   tuned-viewer show balanced --format json   # Show profile in JSON format
   tuned-viewer hierarchy latency-performance # Show profile hierarchy
   tuned-viewer validate realtime-virtual-host # Validate profile
+
+  # OpenShift/Kubernetes cluster operations
+  tuned-viewer cluster                        # Show cluster tuned status
+  tuned-viewer sync                           # Sync profiles from cluster
+  tuned-viewer env                            # Show environment info
+  tuned-viewer node worker-1                 # Analyze profile for specific node
         """
     )
 
@@ -269,6 +439,18 @@ Examples:
     validate_parser = subparsers.add_parser('validate', help='Validate profile hierarchy')
     validate_parser.add_argument('profile', help='Profile name to validate')
 
+    # OpenShift/Kubernetes specific commands
+    cluster_parser = subparsers.add_parser('cluster', help='Show OpenShift cluster tuned status')
+
+    sync_parser = subparsers.add_parser('sync', help='Sync profiles from cluster')
+    sync_parser.add_argument('--output-dir', default='./cluster_profiles',
+                            help='Directory to sync profiles to (default: ./cluster_profiles)')
+
+    env_parser = subparsers.add_parser('env', help='Show environment information')
+
+    node_parser = subparsers.add_parser('node', help='Analyze tuned profile for a specific node')
+    node_parser.add_argument('node_name', help='Node name to analyze')
+
     # Global options
     parser.add_argument('--directories', nargs='+',
                        help='Custom directories to search for profiles')
@@ -287,6 +469,14 @@ Examples:
         success = viewer.show_hierarchy(args.profile)
     elif args.command == 'validate':
         success = viewer.validate_profile(args.profile)
+    elif args.command == 'cluster':
+        success = viewer.show_cluster_status()
+    elif args.command == 'sync':
+        success = viewer.sync_from_cluster(args.output_dir)
+    elif args.command == 'env':
+        success = viewer.show_environment_info()
+    elif args.command == 'node':
+        success = viewer.analyze_node_profile(args.node_name)
     else:
         parser.print_help()
         return 1

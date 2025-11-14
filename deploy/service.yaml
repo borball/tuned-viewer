@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tuned-viewer
+  namespace: tuned-viewer
+  labels:
+    app.kubernetes.io/name: tuned-viewer
+    app.kubernetes.io/component: analysis-tool
+    app.kubernetes.io/instance: service
+spec:
+  selector:
+    app.kubernetes.io/name: tuned-viewer
+    app.kubernetes.io/instance: service
+
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+
+  type: ClusterIP
+
+---
+# Optional: Route for external access (OpenShift specific)
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: tuned-viewer
+  namespace: tuned-viewer
+  labels:
+    app.kubernetes.io/name: tuned-viewer
+    app.kubernetes.io/component: analysis-tool
+spec:
+  to:
+    kind: Service
+    name: tuned-viewer
+    weight: 100
+  port:
+    targetPort: metrics
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

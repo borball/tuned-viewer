@@ -253,6 +253,72 @@ You can specify custom profile directories:
 tuned-viewer show myprofile --directories /path/to/profiles /another/path
 ```
 
+## OpenShift/Kubernetes Deployment
+
+The tool can be deployed as a pod in OpenShift clusters to analyze tuned profiles across the cluster.
+
+### Quick Deployment
+
+```bash
+# Deploy to OpenShift cluster
+./deploy/deploy.sh
+
+# Run analysis
+oc exec -it deployment/tuned-viewer -- python3 -m tuned_viewer cluster
+```
+
+### Deployment Options
+
+1. **Interactive Deployment** - Long-running pod for interactive analysis:
+   ```bash
+   oc apply -f deploy/namespace.yaml
+   oc apply -f deploy/rbac.yaml
+   oc apply -f deploy/deployment.yaml
+   ```
+
+2. **Analysis Job** - One-time comprehensive cluster analysis:
+   ```bash
+   oc create -f deploy/job.yaml
+   oc logs -f job/tuned-viewer-analysis
+   ```
+
+3. **Simple Pod** - Basic pod for quick analysis:
+   ```bash
+   oc apply -f deploy/pod.yaml
+   oc logs -f pod/tuned-viewer
+   ```
+
+### OpenShift Commands
+
+```bash
+# Show cluster-wide tuned status
+tuned-viewer cluster
+
+# Sync profiles from cluster pods and ConfigMaps
+tuned-viewer sync --output-dir ./cluster_profiles
+
+# Analyze specific node's profile
+tuned-viewer node worker-1
+
+# Show environment information
+tuned-viewer env
+```
+
+### RBAC Permissions
+
+The tool requires these cluster permissions:
+- Read access to tuned pods in `openshift-cluster-node-tuning-operator` namespace
+- Access to execute commands in tuned pods
+- Read access to ConfigMaps containing tuned profiles
+- Read access to Tuned custom resources from Node Tuning Operator
+
+### Container Features
+
+- **Pod Environment Detection**: Automatically detects when running in a pod
+- **Host Mount Support**: Accesses host tuned profiles via `/host` mounts
+- **Cluster Integration**: Uses `oc` commands to interact with cluster resources
+- **Service Account**: Runs with appropriate RBAC permissions
+
 ## API Usage
 
 The tool can also be used as a Python library:
@@ -270,6 +336,10 @@ success = viewer.show_hierarchy('realtime-compute')
 
 # Validate profile
 success = viewer.validate_profile('realtime-compute')
+
+# OpenShift cluster analysis
+success = viewer.show_cluster_status()
+success = viewer.sync_from_cluster('./cluster_profiles')
 ```
 
 ## Error Handling
