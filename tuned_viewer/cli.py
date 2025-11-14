@@ -228,9 +228,23 @@ class TunedViewer:
             print("=" * 50)
 
             print(f"Running in pod: {'Yes' if env_info['in_pod'] else 'No'}")
+            print(f"OpenShift node: {'Yes' if env_info.get('in_openshift_node') else 'No'}")
 
             if env_info.get('namespace'):
                 print(f"Namespace: {env_info['namespace']}")
+
+            # Show active profile if on OpenShift node
+            if env_info.get('in_openshift_node'):
+                try:
+                    import subprocess
+                    result = subprocess.run(['tuned-adm', 'active'], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        active_line = [line for line in result.stdout.split('\n') if 'Current active profile:' in line]
+                        if active_line:
+                            active_profile = active_line[0].split(':')[-1].strip()
+                            print(f"Active tuned profile: {active_profile}")
+                except:
+                    pass
 
             if env_info['environment_variables']:
                 print("\nEnvironment Variables:")

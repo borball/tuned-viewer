@@ -19,23 +19,37 @@ class ProfileLocator:
         '/run/tuned/profiles',      # Runtime profiles
     ]
 
-    # Pod-mounted directories (for OpenShift/Kubernetes environments)
+    # OpenShift Node Tuning Operator directories (actual generated profiles)
+    OPENSHIFT_DIRECTORIES = [
+        '/var/lib/ocp-tuned/profiles',    # Node Tuning Operator profiles (primary)
+        '/etc/tuned/profiles',            # User-defined profiles
+        '/usr/lib/tuned/profiles',        # System profiles
+        '/run/tuned/profiles',            # Runtime profiles
+    ]
+
+    # Pod-mounted directories (for container environments)
     POD_MOUNT_DIRECTORIES = [
-        '/host/etc/tuned/profiles',    # Host /etc mounted in pod
-        '/host/usr/lib/tuned/profiles', # Host /usr/lib mounted in pod
-        '/etc/tuned/profiles',         # Pod's own /etc
-        '/usr/lib/tuned/profiles',     # Pod's own /usr/lib
+        '/host/var/lib/ocp-tuned/profiles', # Host Node Tuning Operator profiles
+        '/host/etc/tuned/profiles',         # Host /etc mounted in pod
+        '/host/usr/lib/tuned/profiles',     # Host /usr/lib mounted in pod
+        '/var/lib/ocp-tuned/profiles',      # Container's ocp-tuned profiles
+        '/etc/tuned/profiles',              # Pod's own /etc
+        '/usr/lib/tuned/profiles',          # Pod's own /usr/lib
     ]
 
     def __init__(self, custom_directories: Optional[List[str]] = None, detect_pod_env: bool = True):
         """Initialize with optional custom directories."""
         self.in_pod = self._detect_pod_environment() if detect_pod_env else False
+        self.in_openshift_node = self._detect_openshift_node()
 
         if custom_directories:
             self.directories = custom_directories
         elif self.in_pod:
             # Use pod-aware directories when running in a container
             self.directories = self.POD_MOUNT_DIRECTORIES.copy()
+        elif self.in_openshift_node:
+            # Use OpenShift directories when running directly on a node
+            self.directories = self.OPENSHIFT_DIRECTORIES.copy()
         else:
             self.directories = self.STANDARD_DIRECTORIES.copy()
 
@@ -50,6 +64,14 @@ class ProfileLocator:
             os.environ.get('KUBERNETES_SERVICE_HOST') is not None or
             os.path.exists('/host/etc') or  # Common host mount point
             os.environ.get('NODE_NAME') is not None  # Often set in tuned pods
+        )
+
+    def _detect_openshift_node(self) -> bool:
+        """Detect if we're running directly on an OpenShift node."""
+        return (
+            os.path.exists('/var/lib/ocp-tuned/profiles') and
+            os.path.exists('/etc/kubernetes') and
+            not self.in_pod  # Not in a pod, but on the actual node
         )
 
     def find_profile(self, profile_name: str) -> Optional[str]:
@@ -143,6 +165,7 @@ class ProfileLocator:
         """Get information about the current environment."""
         info = {
             'in_pod': self.in_pod,
+            'in_openshift_node': self.in_openshift_node,
             'searched_directories': self.directories,
             'environment_variables': {}
         }

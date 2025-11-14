@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: tuned-viewer
-  labels:
-    name: tuned-viewer
-    app.kubernetes.io/name: tuned-viewer
-    app.kubernetes.io/component: analysis-tool
